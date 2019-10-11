@@ -33,7 +33,7 @@ def _index_result(server,port):
     timestamp = time.gmtime()
     
     stockpile_file = os.popen('grep stockpile_output_path group_vars/all.yml | awk \'{printf $2}\'').read()
-    kube_dir = os.popen('grep tmp_dir group_vars/all.yml | awk \'{printf $2}\'').read()
+    kube_dir = os.popen('grep backpack_output_dir group_vars/all.yml | awk \'{printf $2}\'').read()
 
     if os.path.exists(stockpile_file):
         _upload_to_es(stockpile_file,my_uuid,timestamp,es,index)
