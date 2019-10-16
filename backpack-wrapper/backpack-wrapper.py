@@ -21,8 +21,8 @@ from transcribe.render import transcribe
 
 def _index_result(server,port,payload_file):
     index = "backpack-results"
-    es = elasticsearch.Elasticsearch([
-        {'host': server,'port': port}],send_get_body_as='POST')
+    _es_connection_string = str(server) + ':' + str(port)
+    es = elasticsearch.Elasticsearch([_es_connection_string],send_get_body_as='POST')
     if not es.indices.exists(index):
         es.indices.create(index=index)
     es.indices.put_mapping(index=index, doc_type="result", body={"dynamic_templates": [{"rule1": {"mapping": {"type": "string"},"match_mapping_type": "long"}}]})
