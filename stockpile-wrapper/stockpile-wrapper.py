@@ -26,8 +26,8 @@ from transcribe.render import transcribe
 
 def _index_result(server,port,my_uuid):
     index = "stockpile-results-raw"
-    es = elasticsearch.Elasticsearch([
-        {'host': server,'port': port}],send_get_body_as='POST')
+    _es_connection_string = str(server) + ':' + str(port)
+    es = elasticsearch.Elasticsearch([_es_connection_string],send_get_body_as='POST')
     indexed=True
     timestamp = int(time.time())
     
