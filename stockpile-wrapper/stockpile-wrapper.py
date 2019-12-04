@@ -43,8 +43,8 @@ def _upload_to_es(payload_file,my_uuid,timestamp,es,index):
         try:
             scribe_module = json.loads(scribed)['module']
             _data = { "uuid": my_uuid,
-                            "timestamp": timestamp,
-                            "data": scribed }
+                            "timestamp": timestamp, }
+            _data.update(json.loads(scribed))
             es.index(index=scribe_module+"-metadata", body=_data)
         except Exception as e:
             print(repr(e) + "occurred for the json document:")
