@@ -24,7 +24,7 @@ import base64
 import json
 from transcribe.render import transcribe
 
-def _index_result(server,port,my_uuid):
+def _index_result(server,port,my_uuid,my_node,my_pod):
     index = "stockpile-results-raw"
     _es_connection_string = str(server) + ':' + str(port)
     es = elasticsearch.Elasticsearch([_es_connection_string],send_get_body_as='POST')
@@ -34,16 +34,18 @@ def _index_result(server,port,my_uuid):
     stockpile_file = os.popen('grep stockpile_output_path group_vars/all.yml | awk \'{printf $2}\'').read()
 
     if os.path.exists(stockpile_file):
-        _upload_to_es(stockpile_file,my_uuid,timestamp,es,index)
-        _upload_to_es_bulk(stockpile_file,my_uuid,timestamp,es,index)
+        _upload_to_es(stockpile_file,my_uuid,timestamp,es,index,my_node,my_pod)
+        _upload_to_es_bulk(stockpile_file,my_uuid,timestamp,es,index,my_node,my_pod)
 
-def _upload_to_es(payload_file,my_uuid,timestamp,es,index):
+def _upload_to_es(payload_file,my_uuid,timestamp,es,index,my_node,my_pod):
     payload = open(payload_file, "rb").read()
     for scribed in transcribe(payload_file,'stockpile'):
         try:
             scribe_module = json.loads(scribed)['module']
             _data = { "uuid": my_uuid,
-                            "timestamp": timestamp, }
+                            "timestamp": timestamp, 
+                            "node_name": my_node, 
+                            "pod_name": my_pod, }
             _data.update(json.loads(scribed))
             es.index(index=scribe_module+"-metadata", body=_data)
         except Exception as e:
@@ -51,12 +53,14 @@ def _upload_to_es(payload_file,my_uuid,timestamp,es,index):
             print(str(scribed))
             indexed=False
 
-def _upload_to_es_bulk(payload_file,my_uuid,timestamp,es,index):
+def _upload_to_es_bulk(payload_file,my_uuid,timestamp,es,index,my_node,my_pod):
     payload = open(payload_file, "rb").read()
     raw_stockpile = str(base64.urlsafe_b64encode(payload))
     try:
         _data = { "uuid": my_uuid,
                         "timestamp": timestamp,
+                        "node_name": my_node, 
+                        "pod_name": my_pod, 
                         "data": raw_stockpile }
         es.index(index=index, body=_data)
     except Exception as e:
@@ -80,13 +84,25 @@ def main():
     parser.add_argument(
         '-u', '--uuid', 
         help='UUID to provide to elastic')
+    parser.add_argument(
+        '-n', '--nodename', 
+        help='Node Name to provide to elastic')
+    parser.add_argument(
+        '-N', '--podname',
+        help='Pod Name to provide to elastic')
     args = parser.parse_args()
     my_uuid = args.uuid
+    my_node = args.nodename
+    my_pod = args.podname
     if my_uuid is None:
         my_uuid = str(uuid.uuid4())
     _run_stockpile()
+    if my_node is None:
+        my_node = "Null"
+    if my_pod is None:
+        my_pod = "Null"
     if args.server is not "none":
-        _index_result(args.server,args.port,my_uuid)
+        _index_result(args.server,args.port,my_uuid,my_node,my_pod)
     print("uuid: ",my_uuid)
 
 if __name__ == '__main__':
