@@ -13,6 +13,7 @@
 
 import argparse
 from datetime import datetime
+from elasticsearch_dsl import Search 
 import elasticsearch
 import time
 import subprocess
@@ -22,6 +23,7 @@ import os
 import uuid
 import base64
 import json
+import redis
 from transcribe.render import transcribe
 
 def _index_result(server,port,my_uuid,my_node,my_pod):
@@ -73,6 +75,39 @@ def _run_stockpile():
     stdout,stderr = process.communicate()
     return process.returncode
 
+def _check_index(server,port,my_uuid,my_node):
+    _es_connection_string = str(server) + ':' + str(port)
+    es = elasticsearch.Elasticsearch([_es_connection_string],send_get_body_as='POST')
+
+    # We are using metadata-cpuinfo as it is a basic index that should regularly be there without any extended permissions
+    s = Search(using=es, index="cpuinfo-metadata").query("match", uuid=my_uuid).query("match",node_name=my_node)
+
+    check_results = s.execute()
+
+    if check_results['hits']['total']['value'] > 0:
+        return True
+    else:
+        return False
+
+def _mark_node(r,my_node,my_uuid,server,port,check_val):
+    current_val = r.get(check_val)
+
+    # If the metadata claims to exist check if it does. If it is unable to find data then run it again
+    # If its running let it run
+    # Else run the collection
+    if current_val == "Metadata-Exists":
+        if _check_index(server,port,my_uuid,my_node):
+            return "exists"
+        else:
+            r.set(check_val,"Metadata-Running")
+            return "run"
+    elif current_val == "Metadata-Running":
+        return "running"
+    else:
+        r.set(check_val,"Metadata-Running")
+        return "run"
+    
+
 def main():
     parser = argparse.ArgumentParser(description="Stockpile Wrapper script")
     parser.add_argument(
@@ -90,19 +125,42 @@ def main():
     parser.add_argument(
         '-N', '--podname',
         help='Pod Name to provide to elastic')
+    parser.add_argument(
+        '--redisip',
+        help='IP address for redis server')
+    parser.add_argument(
+        '--redisport',
+        help='Port for the redis server')
+    parser.add_argument(
+        '--force',
+        help='Force metadata collection regardless of redis',
+        action="store_true")
     args = parser.parse_args()
     my_uuid = args.uuid
     my_node = args.nodename
     my_pod = args.podname
+
+    run = "run"
+    if args.redisip is not None and args.redisport is not None and my_node is not None and my_uuid is not None:
+       r = redis.StrictRedis(host=args.redisip, port=args.redisport, charset="utf-8", decode_responses=True)
+       check_val = my_uuid + "-" + my_node
+       run = _mark_node(r,my_node,my_uuid,args.server,args.port,check_val)
+    
     if my_uuid is None:
         my_uuid = str(uuid.uuid4())
-    _run_stockpile()
+    if run == "run" or args.force:
+        _run_stockpile()
+    else:
+        print("Metadata already collected on ",my_node)
+    
     if my_node is None:
         my_node = "Null"
     if my_pod is None:
         my_pod = "Null"
     if args.server is not "none":
         _index_result(args.server,args.port,my_uuid,my_node,my_pod)
+        if r is not None and run == "run":
+            r.set(check_val,"Metadata-Exists")
     print("uuid: ",my_uuid)
 
 if __name__ == '__main__':
