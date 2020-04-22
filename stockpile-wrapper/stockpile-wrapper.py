@@ -27,7 +27,7 @@ from transcribe.render import transcribe
 def _index_result(server,port,my_uuid,my_node,my_pod,es_verify_cert):
     index = "stockpile-results-raw"
     _es_connection_string = str(es['server']) + ':' + str(es['port'])
-    if es_verify_cert == "true":
+    if es_verify_cert == "false":
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         ssl_ctx = ssl.create_default_context()
@@ -91,8 +91,8 @@ def main():
         '-p', '--port', 
         help='Provide elastic port information')
     parser.add_argument(
-        '--disabletls', 
-        help='disable tls verification for es',
+        '--usessl', 
+        help='if es is setup with ssl, but can disable tls cert verification',
         default=false)
     parser.add_argument(
         '-u', '--uuid', 
