@@ -24,10 +24,10 @@ import base64
 import json
 from transcribe.render import transcribe
 
-def _index_result(server,port,my_uuid,my_node,my_pod,es_verify_cert):
+def _index_result(server,port,my_uuid,my_node,my_pod,es_ssl):
     index = "stockpile-results-raw"
     _es_connection_string = str(es['server']) + ':' + str(es['port'])
-    if es_verify_cert == "false":
+    if es_ssl == "true":
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         ssl_ctx = ssl.create_default_context()
@@ -115,7 +115,7 @@ def main():
     if my_pod is None:
         my_pod = "Null"
     if args.server is not "none":
-        _index_result(args.server,args.port,my_uuid,my_node,my_pod,args.es_verify_cert)
+        _index_result(args.server,args.port,my_uuid,my_node,my_pod,args.usessl)
     print("uuid: ",my_uuid)
 
 if __name__ == '__main__':
