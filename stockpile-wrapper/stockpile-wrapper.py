@@ -91,7 +91,7 @@ def main():
         '-p', '--port', 
         help='Provide elastic port information')
     parser.add_argument(
-        '--usessl', 
+        '--sslskipverify', 
         help='if es is setup with ssl, but can disable tls cert verification',
         default=false)
     parser.add_argument(
@@ -115,7 +115,7 @@ def main():
     if my_pod is None:
         my_pod = "Null"
     if args.server is not "none":
-        _index_result(args.server,args.port,my_uuid,my_node,my_pod,args.usessl)
+        _index_result(args.server,args.port,my_uuid,my_node,my_pod,args.sslskipverify)
     print("uuid: ",my_uuid)
 
 if __name__ == '__main__':
