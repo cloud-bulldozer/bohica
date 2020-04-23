@@ -128,7 +128,7 @@ def main():
     parser.add_argument(
         '--sslskipverify', 
         help='if es is setup with ssl, but can disable tls cert verification',
-        default=false)
+        default=False)
     parser.add_argument(
         '-u', '--uuid', 
         help='UUID to provide to elastic')
