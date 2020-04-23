@@ -26,10 +26,19 @@ import json
 import redis
 from transcribe.render import transcribe
 
-def _index_result(server,port,my_uuid,my_node,my_pod):
+def _index_result(server,port,my_uuid,my_node,my_pod,es_ssl):
     index = "stockpile-results-raw"
-    _es_connection_string = str(server) + ':' + str(port)
-    es = elasticsearch.Elasticsearch([_es_connection_string],send_get_body_as='POST')
+    _es_connection_string = str(es['server']) + ':' + str(es['port'])
+    if es_ssl == "true":
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        es = elasticsearch.Elasticsearch([_es_connection_string], send_get_body_as='POST',
+                                                 ssl_context=ssl_ctx, use_ssl=True)
+    else:
+        es = elasticsearch.Elasticsearch([_es_connection_string], send_get_body_as='POST')
     indexed=True
     timestamp = int(time.time())
     
@@ -117,6 +126,10 @@ def main():
         '-p', '--port', 
         help='Provide elastic port information')
     parser.add_argument(
+        '--sslskipverify', 
+        help='if es is setup with ssl, but can disable tls cert verification',
+        default=false)
+    parser.add_argument(
         '-u', '--uuid', 
         help='UUID to provide to elastic')
     parser.add_argument(
@@ -158,7 +171,7 @@ def main():
     if my_pod is None:
         my_pod = "Null"
     if args.server is not "none":
-        _index_result(args.server,args.port,my_uuid,my_node,my_pod)
+        _index_result(args.server,args.port,my_uuid,my_node,my_pod,args.sslskipverify)
         if r is not None and run == "run":
             r.set(check_val,"Metadata-Exists")
     print("uuid: ",my_uuid)
