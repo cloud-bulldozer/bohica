@@ -28,7 +28,7 @@ from transcribe.render import transcribe
 
 def _index_result(server,port,my_uuid,my_node,my_pod,es_ssl):
     index = "stockpile-results-raw"
-    _es_connection_string = str(es['server']) + ':' + str(es['port'])
+    _es_connection_string = str(server) + ':' + str(port)
     if es_ssl == "true":
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
