@@ -172,7 +172,7 @@ def main():
         my_pod = "Null"
     if args.server is not "none":
         _index_result(args.server,args.port,my_uuid,my_node,my_pod,args.sslskipverify)
-        if r is not None and run == "run":
+        if args.redisip is not None and args.redisport is not None and run == "run":
             r.set(check_val,"Metadata-Exists")
     print("uuid: ",my_uuid)
 
