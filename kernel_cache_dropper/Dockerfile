@@ -1,5 +1,5 @@
-FROM registry.access.redhat.com/ubi8:latest
+FROM fedora:31
 
-RUN dnf install -y --nodocs python3
+RUN dnf install -y --nodocs python3 python3-cherrypy
 RUN ln -s /usr/bin/python3 /usr/bin/python
-COPY . /opt/kernel_cache_dropper
+COPY . /opt/kernel_cache_drop
