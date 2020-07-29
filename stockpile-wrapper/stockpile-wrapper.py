@@ -55,10 +55,10 @@ def _upload_to_es(payload_file, my_uuid, timestamp, es, my_node, my_pod, index_r
     def doc_stream():
         for scribed in transcribe(payload_file, 'stockpile'):
             doc = json.loads(scribed)
-            scribe_module = "%s-metadata" % doc["module"]
+            es_index = "%s-metadata" % doc["module"]
             data = {"uuid": my_uuid, "timestamp": timestamp, "node_name": my_node, "pod_name": my_pod}
             data.update(doc)
-            yield {"_index": scribe_module,
+            yield {"_index": es_index,
                    "_source": data,
                    "_op_type": "index"}
 
@@ -72,25 +72,26 @@ def _upload_to_es(payload_file, my_uuid, timestamp, es, my_node, my_pod, index_r
                 pass
         # Catch indexing exception
         except BulkIndexError as err:
+            exception = err
             retry = True
             docs = []
             # An exception can refer to multiple documents
             for failed_doc in err.errors:
                 failed += 1
-                scribe_module = "%s-metadata" % failed_doc["index"]["data"]["module"]
-                doc = {"_index": scribe_module,
+                es_index = "%s-metadata" % failed_doc["index"]["data"]["module"]
+                doc = {"_index": es_index,
                        "_source": failed_doc["index"]["data"],
                        "_op_type": "index"}
                 docs.append(doc)
         except Exception as err:
             print("Unknown indexing error: %s" % err)
+            return
         if not retry:
             break
     print("%d documents successfully indexed" % (total_docs - failed))
     if failed > 0:
         print("%d documents couldn't be indexed" % failed)
-        for failed_doc in docs:
-            print("Failed to index %s" % failed_doc)
+        print("Indexing exception found %s" % exception)
 
 
 def _upload_to_es_bulk(payload_file, my_uuid, timestamp, es, index, my_node, my_pod):
@@ -104,11 +105,11 @@ def _upload_to_es_bulk(payload_file, my_uuid, timestamp, es, index, my_node, my_
                  "data": raw_stockpile}
         es.index(index=index, body=_data)
     except Exception as e:
-        print(repr(e) + "occurred for the json document:")
+        print("Indexing exception found %s" % e)
 
 
-def _run_stockpile(tags):
-    cmd = ["/usr/bin/ansible-playbook", "-i", "hosts", "stockpile.yml", "--tags", tags]
+def _run_stockpile(tags, skip_tags):
+    cmd = ["ansible-playbook", "-i", "hosts", "stockpile.yml", "--tags", tags, "--skip-tags", skip_tags]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     return process.returncode
@@ -193,11 +194,14 @@ def main():
         '--tags',
         help='Comma separated tags to run stockpile with',
         default='all')
+    parser.add_argument(
+        '--skip-tags',
+        help='Comma separated tags to skip in stockpile',
+        default='None')
     args = parser.parse_args()
     my_uuid = args.uuid
     my_node = args.nodename
     my_pod = args.podname
-    tags = args.tags
 
     run = "run"
     if args.redisip is not None and args.redisport is not None and my_node is not None and my_uuid is not None:
@@ -208,7 +212,7 @@ def main():
     if my_uuid is None:
         my_uuid = str(uuid.uuid4())
     if run == "run" or args.force:
-        _run_stockpile(tags)
+        _run_stockpile(args.tags, args.skip_tags)
     else:
         print("Metadata already collected on %s " % my_node)
 
