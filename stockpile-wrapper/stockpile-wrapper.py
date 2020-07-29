@@ -108,8 +108,7 @@ def _upload_to_es_bulk(payload_file, my_uuid, timestamp, es, index, my_node, my_
 
 
 def _run_stockpile(tags):
-    cmd = ["/usr/bin/ansible-playbook", "-i", "hosts", "stockpile.yml", "-e",
-           "ansible_python_interpreter=/opt/app-root/bin/python", "--tags", tags]
+    cmd = ["/usr/bin/ansible-playbook", "-i", "hosts", "stockpile.yml", "--tags", tags]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     return process.returncode
