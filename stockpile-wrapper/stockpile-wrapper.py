@@ -23,6 +23,7 @@ import base64
 import json
 import redis
 import ssl
+import hashlib
 from transcribe.render import transcribe
 from elasticsearch.helpers import parallel_bulk, BulkIndexError
 
@@ -51,22 +52,27 @@ def _index_result(server, port, my_uuid, my_node, my_pod, es_ssl, index_retries)
 
 def _upload_to_es(payload_file, my_uuid, timestamp, es, my_node, my_pod, index_retries):
     failed = 0
+    existent = 0
 
     def doc_stream():
         for scribed in transcribe(payload_file, 'stockpile'):
             doc = json.loads(scribed)
             es_index = "%s-metadata" % doc["module"]
-            data = {"uuid": my_uuid, "timestamp": timestamp, "node_name": my_node, "pod_name": my_pod}
+            data = {"uuid": my_uuid, "node_name": my_node, "pod_name": my_pod}
             data.update(doc)
+            _id = hashlib.sha256(str(data).encode()).hexdigest()
+            data["timestamp"] = timestamp
             yield {"_index": es_index,
                    "_source": data,
-                   "_op_type": "index"}
+                   "_id": _id,
+                   "_op_type": "create"}
 
     docs = [d for d in doc_stream()]
     total_docs = len(docs)
     for r in range(index_retries):
-        retry = False
         failed = 0
+        existent = 0
+        retry = False
         try:
             for ok, resp in parallel_bulk(es, docs):
                 pass
@@ -77,21 +83,28 @@ def _upload_to_es(payload_file, my_uuid, timestamp, es, my_node, my_pod, index_r
             docs = []
             # An exception can refer to multiple documents
             for failed_doc in err.errors:
+                # Document already exists in ES
+                if failed_doc["create"]["status"] == 409:
+                    existent += 1
+                    continue
                 failed += 1
-                es_index = "%s-metadata" % failed_doc["index"]["data"]["module"]
+                es_index = "%s-metadata" % failed_doc["create"]["data"]["module"]
                 doc = {"_index": es_index,
-                       "_source": failed_doc["index"]["data"],
-                       "_op_type": "index"}
+                       "_source": failed_doc["create"]["data"],
+                       "_id": failed_doc["create"]["_id"],
+                       "_op_type": "create"}
                 docs.append(doc)
         except Exception as err:
             print("Unknown indexing error: %s" % err)
             return
         if not retry:
             break
-    print("%d documents successfully indexed" % (total_docs - failed))
+    print("%d documents successfully indexed" % (total_docs - failed - existent))
     if failed > 0:
         print("%d documents couldn't be indexed" % failed)
         print("Indexing exception found %s" % exception)
+    if existent > 0:
+        print("%d documents already existed in ES" % existent)
 
 
 def _upload_to_es_bulk(payload_file, my_uuid, timestamp, es, index, my_node, my_pod):
