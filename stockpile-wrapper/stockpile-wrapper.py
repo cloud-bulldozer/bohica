@@ -23,6 +23,7 @@ import base64
 import json
 import redis
 import ssl
+import hashlib
 from transcribe.render import transcribe
 from elasticsearch.helpers import parallel_bulk, BulkIndexError
 
@@ -50,48 +51,65 @@ def _index_result(server, port, my_uuid, my_node, my_pod, es_ssl, index_retries)
 
 
 def _upload_to_es(payload_file, my_uuid, timestamp, es, my_node, my_pod, index_retries):
-    failed = 0
+    documents = {
+            "total": 0,
+            "existent": 0,
+            "total": 0
+    }
 
     def doc_stream():
         for scribed in transcribe(payload_file, 'stockpile'):
             doc = json.loads(scribed)
             es_index = "%s-metadata" % doc["module"]
-            data = {"uuid": my_uuid, "timestamp": timestamp, "node_name": my_node, "pod_name": my_pod}
-            data.update(doc)
+            doc["uuid"] = my_uuid
+            _id = hashlib.sha256(str(doc).encode()).hexdigest()
+            # This information changes depending on the node and pod where stockpile-wrapper is executed
+            # Don't include it in the _id calculation to avoid indexing several times documents not
+            # specific to a node
+            doc["node_name"] = my_node
+            doc["pod_name"] = my_pod
+            doc["timestamp"] = timestamp
+            documents["total"] += 1
             yield {"_index": es_index,
-                   "_source": data,
-                   "_op_type": "index"}
+                   "_source": doc,
+                   "_id": _id,
+                   "_op_type": "create"}
 
-    docs = [d for d in doc_stream()]
-    total_docs = len(docs)
+    failed_docs = []
     for r in range(index_retries):
-        retry = False
-        failed = 0
+        documents["failed"] = 0
+        documents["existent"] = 0
         try:
-            for ok, resp in parallel_bulk(es, docs):
+            for ok, resp in parallel_bulk(es, doc_stream()):
                 pass
         # Catch indexing exception
         except BulkIndexError as err:
             exception = err
-            retry = True
-            docs = []
             # An exception can refer to multiple documents
             for failed_doc in err.errors:
-                failed += 1
-                es_index = "%s-metadata" % failed_doc["index"]["data"]["module"]
+                # Document already exists in ES
+                if failed_doc["create"]["status"] == 409:
+                    documents["existent"] += 1
+                    continue
+                documents["failed"] += 1
+                es_index = "%s-metadata" % failed_doc["create"]["data"]["module"]
                 doc = {"_index": es_index,
-                       "_source": failed_doc["index"]["data"],
-                       "_op_type": "index"}
-                docs.append(doc)
+                       "_source": failed_doc["create"]["data"],
+                       "_id": failed_doc["create"]["_id"],
+                       "_op_type": "create"}
+                failed_docs.append(doc)
         except Exception as err:
             print("Unknown indexing error: %s" % err)
             return
-        if not retry:
+        if not documents["failed"]:
             break
-    print("%d documents successfully indexed" % (total_docs - failed))
-    if failed > 0:
-        print("%d documents couldn't be indexed" % failed)
+    if documents["total"] > documents["failed"] + documents["existent"]:
+        print("%d documents successfully indexed" % (documents["total"] - documents["failed"] - documents["existent"]))
+    if documents["failed"] > 0:
+        print("%d documents couldn't be indexed" % documents["failed"])
         print("Indexing exception found %s" % exception)
+    if documents["existent"] > 0:
+        print("%d documents already exist in ES" % documents["existent"])
 
 
 def _upload_to_es_bulk(payload_file, my_uuid, timestamp, es, index, my_node, my_pod):
@@ -112,7 +130,7 @@ def _run_stockpile(tags, skip_tags):
     cmd = ["ansible-playbook", "-i", "hosts", "stockpile.yml", "--tags", tags, "--skip-tags", skip_tags]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
-    return process.returncode
+    return process.returncode, stdout.decode("utf-8"), stderr.decode("utf-8")
 
 
 def _check_index(server, port, my_uuid, my_node):
@@ -212,7 +230,10 @@ def main():
     if my_uuid is None:
         my_uuid = str(uuid.uuid4())
     if run == "run" or args.force:
-        _run_stockpile(args.tags, args.skip_tags)
+        rc, stdout, stderr = _run_stockpile(args.tags, args.skip_tags)
+        if rc != 0:
+            print("Stockpile execution error: %s" % stderr)
+            sys.exit(1)
     else:
         print("Metadata already collected on %s " % my_node)
 
