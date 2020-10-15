@@ -27,9 +27,7 @@ import hashlib
 from transcribe.render import transcribe
 from elasticsearch.helpers import parallel_bulk, BulkIndexError
 
-
-def _index_result(server, port, my_uuid, my_node, my_pod, es_ssl, index_retries):
-    index = "stockpile-results-raw"
+def _connect_to_es(server, port, es_ssl):
     _es_connection_string = str(server) + ':' + str(port)
     if es_ssl == "true":
         import urllib3
@@ -41,6 +39,11 @@ def _index_result(server, port, my_uuid, my_node, my_pod, es_ssl, index_retries)
                                          ssl_context=ssl_ctx, use_ssl=True)
     else:
         es = elasticsearch.Elasticsearch([_es_connection_string], send_get_body_as='POST')
+
+    return es
+
+def _index_result(es, my_uuid, my_node, my_pod, index_retries):
+    index = "stockpile-results-raw"
     timestamp = int(time.time())
 
     stockpile_file = os.popen('grep stockpile_output_path group_vars/all.yml | awk \'{printf $2}\'').read()
@@ -48,7 +51,6 @@ def _index_result(server, port, my_uuid, my_node, my_pod, es_ssl, index_retries)
     if os.path.exists(stockpile_file):
         _upload_to_es(stockpile_file, my_uuid, timestamp, es, my_node, my_pod, index_retries)
         _upload_to_es_bulk(stockpile_file, my_uuid, timestamp, es, index, my_node, my_pod)
-
 
 def _upload_to_es(payload_file, my_uuid, timestamp, es, my_node, my_pod, index_retries):
     documents = {
@@ -133,29 +135,25 @@ def _run_stockpile(tags, skip_tags):
     return process.returncode, stdout.decode("utf-8"), stderr.decode("utf-8")
 
 
-def _check_index(server, port, my_uuid, my_node):
-    _es_connection_string = str(server) + ':' + str(port)
-    es = elasticsearch.Elasticsearch([_es_connection_string], send_get_body_as='POST')
-
+def _check_index(es, my_uuid, my_node):
     # We are using metadata-cpuinfo as it is a basic index that should regularly be there without any extended permissions
     s = Search(using=es, index="cpuinfo-metadata").query("match", uuid=my_uuid).query("match", node_name=my_node)
 
     check_results = s.execute()
-
     if check_results['hits']['total']['value'] > 0:
         return True
     else:
         return False
 
 
-def _mark_node(r, my_node, my_uuid, server, port, check_val):
+def _mark_node(r, my_node, my_uuid, es, check_val):
     current_val = r.get(check_val)
 
     # If the metadata claims to exist check if it does. If it is unable to find data then run it again
     # If its running let it run
     # Else run the collection
     if current_val == "Metadata-Exists":
-        if _check_index(server, port, my_uuid, my_node):
+        if _check_index(es, my_uuid, my_node):
             return "exists"
         else:
             r.set(check_val, "Metadata-Running")
@@ -221,11 +219,16 @@ def main():
     my_node = args.nodename
     my_pod = args.podname
 
+    if args.server is not None and args.port is not None:
+        es = _connect_to_es(args.server, args.port, args.sslskipverify)
+
     run = "run"
     if args.redisip is not None and args.redisport is not None and my_node is not None and my_uuid is not None:
-        r = redis.StrictRedis(host=args.redisip, port=args.redisport, charset="utf-8", decode_responses=True)
+        pool = redis.ConnectionPool(host=args.redisip, port=args.redisport, decode_responses=True)
+        r = redis.Redis(connection_pool=pool, charset="utf-8")
+
         check_val = my_uuid + "-" + my_node
-        run = _mark_node(r, my_node, my_uuid, args.server, args.port, check_val)
+        run = _mark_node(r, my_node, my_uuid, es, check_val)
 
     if my_uuid is None:
         my_uuid = str(uuid.uuid4())
@@ -242,9 +245,22 @@ def main():
     if my_pod is None:
         my_pod = "Null"
     if args.server != "none":
-        _index_result(args.server, args.port, my_uuid, my_node, my_pod, args.sslskipverify, args.index_retries)
+        _index_result(es, my_uuid, my_node, my_pod, args.index_retries)
         if args.redisip is not None and args.redisport is not None and run == "run":
             r.set(check_val, "Metadata-Exists")
+    if args.redisip is not None and args.redisport is not None and my_node is not None and my_uuid is not None:
+        print("Closing Redis connection")
+        r.client_setname(my_pod)
+        clients = r.client_list()
+        for x in range(len(clients)):
+            if clients[x]["name"] == my_pod:
+                my_id = clients[x]["id"]
+                break
+        r.client_kill_filter(_id=my_id,skipme=False)
+
+    if es is not None:
+        print("Attempting to close ES connection")
+        es.close()
     print("uuid: %s" % my_uuid)
 
 
