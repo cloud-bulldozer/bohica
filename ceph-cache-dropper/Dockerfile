@@ -1,6 +1,5 @@
-FROM rook/ceph:master
+#FROM rook/ceph:master
+FROM registry.redhat.io/ocs4/rook-ceph-rhel8-operator:latest
 
-USER root
-RUN yum install -y git
-RUN mkdir -p /opt/bohica/
-COPY . /opt/bohica/
+RUN mkdir -p /opt/ceph_cache_drop/
+COPY . /opt/ceph_cache_drop
