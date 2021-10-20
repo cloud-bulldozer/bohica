@@ -5,34 +5,23 @@
 
 import subprocess
 import atexit
-import logging
+import traceback
 import cherrypy
+import logging
 from os import getenv
 from os.path import exists
+
+notok = 1   # process exit status
 
 # script to watch for changes to monitor list and update
 # comes from RHCS image
 
 toolbox_watch_mons_script = '/usr/local/bin/toolbox.sh'
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('dropcache')
-
 def flush_log():
     logging.shutdown()
 
 atexit.register(flush_log)
-
-# parse environment variables if present
-
-port_str = getenv("ceph_cache_drop_port")
-if port_str == None:
-    port_str = '9437'
-port = int(port_str)
-logger.info('ceph cache drop port = %d' % port)
-
-cache_drop_timeout = int(getenv('ceph_cache_drop_timeout', '120'))
-logger.info('cache drop timeout = %d sec' % cache_drop_timeout)
 
 
 # implements web server for URL DropOSDCache/
@@ -41,14 +30,14 @@ class DropOSDCache(object):
     @cherrypy.expose
     def DropOSDCache(self):
         try:
-            logger.info('received cache drop request')
+            cherrypy.log('received cache drop request')
             result = subprocess.check_output(
                 ["/usr/bin/python3", "/usr/bin/ceph", "tell", "osd.*", "cache", "drop"], 
                 timeout=cache_drop_timeout)
-            logger.info(result)
+            cherrypy.log(result.decode())
         except subprocess.CalledProcessError as e:
-            logger.error('failed to drop cache')
-            logger.exception(e)
+            cherrypy.log('ERROR: failed to drop cache')
+            cherrypy.log(str(e))
             return 'FAIL'
         return 'SUCCESS'
 
@@ -69,18 +58,27 @@ def startCherryPy():
   cherrypy.config.update(config)
   cherrypy.quickstart(DropOSDCache())
 
+
+# parse environment variables if present
+
+port = int(getenv("ceph_cache_drop_port", "9437"))
+cherrypy.log('ceph cache drop port = %d' % port)
+
+cache_drop_timeout = int(getenv('ceph_cache_drop_timeout', '120'))
+cherrypy.log('cache drop timeout = %d sec' % cache_drop_timeout)
+
 # keep list of monitors up to date in case monitors ever move
 # this is a best-effort attempt but it might not succeed
 
 if not exists(toolbox_watch_mons_script):
-    logger.warning('cannot react to changes in monitor list')
+    cherrypy.log('WARNING: cannot react to changes in monitor list')
 
 try:
     result_fd = subprocess.Popen(
         ["/bin/sh", "-c", "/usr/local/bin/toolbox.sh"])
-except Exception as e:
-    logger.error('failed to source toolbox')
-    logger.exception(e)
-    sys.exit(1)
+except Exception:
+    cherrypy.log('ERROR: failed to source toolbox')
+    traceback.print_exc()
+    sys.exit(notok)
 
 startCherryPy()
